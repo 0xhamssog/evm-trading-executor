@@ -1,0 +1,34 @@
+{
+  "name": "evm-trading-executor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Constrained Solidity/EVM execution layer for automated trading applications.",
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@12.3.4",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:integration": "forge test --match-contract TradingExecutorIntegrationTest -vv",
+    "test:fork": "forge test --match-contract ForkFrameworkTest -vv",
+    "lint": "eslint .",
+    "demo": "tsx src/demo.ts"
+  },
+  "dependencies": {
+    "pino": "^10.3.1",
+    "viem": "^2.57.1",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.6.3",
+    "eslint": "^10.11.0",
+    "tsx": "^4.23.15",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.71.0",
+    "vitest": "^5.0.3"
+  }
+}

@@ -1,0 +1,10 @@
+node_modules
+dist
+out
+cache
+lib
+.git
+coverage
+broadcast
+.env
+*.log

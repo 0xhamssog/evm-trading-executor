@@ -1,0 +1,183 @@
+name: CI
+
+permissions: {}
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - master
+
+env:
+  SOLC_MINIMUM: "0.8.13"
+  SOLC_LATEST: "0.8.35"
+  SOLC_PRERELEASE: ""
+
+jobs:
+  build-matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.generate.outputs.matrix }}
+    steps:
+      - id: generate
+        run: |
+          MINIMUM="${{ env.SOLC_MINIMUM }}"
+          LATEST="${{ env.SOLC_LATEST }}"
+          PRERELEASE="${{ env.SOLC_PRERELEASE }}"
+          matrix='{"include":['
+          for toolchain in stable nightly; do
+            for flags in \
+              "" \
+              "--via-ir" \
+              "--use solc:${LATEST}" \
+              "--use solc:${LATEST} --via-ir" \
+              "--use solc:${MINIMUM}" \
+              "--use solc:${MINIMUM} --via-ir"
+            do
+              matrix+='{"toolchain":"'"$toolchain"'","flags":"'"$flags"'","prerelease":false},'
+            done
+          done
+          # prerelease (nightly only, svm-rs is not up to date on stable)
+          if [ -n "$PRERELEASE" ]; then
+            for flags in \
+              "--use solc:${PRERELEASE}" \
+              "--use solc:${PRERELEASE} --via-ir"
+            do
+              matrix+='{"toolchain":"nightly","flags":"'"$flags"'","prerelease":true},'
+            done
+          fi
+          matrix="${matrix%,}]}"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: build-matrix
+    name: build +${{ matrix.toolchain }} ${{ matrix.flags }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      id-token: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.build-matrix.outputs.matrix) }}
+    steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
+        with:
+          version: ${{ matrix.toolchain }}
+      - run: forge --version
+      # 3805: "This is a pre-release compiler version, please do not use it in production."
+      - env:
+          INPUT_FLAGS: ${{ matrix.flags }}
+        run: |
+          read -r -a matrix_flags <<< "$INPUT_FLAGS"
+          forge build -vvvvv --skip test --deny warnings ${{ matrix.prerelease && '--ignored-error-codes 3805' || '' }} "${matrix_flags[@]}" --contracts 'test/compilation/*'
+
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      id-token: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: [stable, nightly]
+    steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
+        with:
+          version: ${{ matrix.toolchain }}
+      - run: forge --version
+      - run: forge test -vvv
+
+  fmt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
+      - run: forge --version
+      - run: forge fmt --check
+
+  typos:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: crate-ci/typos@5374cbf686e897b15713110e233094e2874de7ef # v1.46.1
+
+  codeql:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      security-events: write
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: actions
+            build-mode: none
+    steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        with:
+          category: "/language:${{matrix.language}}"
+
+  ci-success:
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - build-matrix
+      - build
+      - test
+      - fmt
+      - typos
+      - codeql
+    timeout-minutes: 10
+    steps:
+      - name: Decide whether the needed jobs succeeded or failed
+        uses: re-actors/alls-green@b5b5b37504aa4183270bd3d855c52a67f212be35 # v1.3.0
+        with:
+          jobs: ${{ toJSON(needs) }}
